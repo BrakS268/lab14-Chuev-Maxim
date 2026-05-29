@@ -185,3 +185,29 @@ AVG, MIN, MAX для температуры, SUM для осадков и азо
 - Время: ~3 мин
 
 ---
+
+## Задание 8: Анализ через DuckDB (SQL)
+
+**Инструмент:** Claude (claude.ai)
+
+**Промпт:**
+Дополни pipeline.py: добавь функцию task8_duckdb(). Выполни SQL-запрос к
+data/agro_clean.parquet через DuckDB — с фильтрацией WHERE, GROUP BY field_id и
+ORDER BY. Тот же запрос воспроизведи в Polars. Замерь время выполнения обоих вариантов
+через time.perf_counter и сравни результат. Без комментариев в коде.
+
+**Что сделано:**
+1. SQL: `SELECT field_id, AVG(temperature_c), AVG(humidity_pct), AVG(soil_moisture_pct),
+   AVG(ph), COUNT(*) FROM read_parquet(...) WHERE temperature_c > 10 AND humidity_pct > 40
+   GROUP BY field_id ORDER BY avg_temp DESC`
+2. Эквивалентный запрос на Polars: `.filter().group_by().agg().sort()`
+3. Замер `time.perf_counter()` для обоих, вывод в миллисекундах и коэффициент разницы
+4. `main` обновлён: `task8_duckdb()` вызывается после сохранения Parquet
+
+**Что исправлялось вручную:** ничего
+
+### Итого
+- Количество промптов: 1
+- Время: ~5 мин
+
+---

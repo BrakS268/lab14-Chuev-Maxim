@@ -181,9 +181,58 @@ def task7_parquet(sensors: pl.DataFrame, weather: pl.DataFrame):
     print(f"Saved weather to {PARQUET_PATH.replace('agro_clean', 'weather_clean')}")
 
 
+# ── Task 8: DuckDB ────────────────────────────────────────────────────────────
+ 
+def task8_duckdb():
+    print("\n── Task 8: DuckDB Analysis ─────────────────────────")
+ 
+    t0 = time.perf_counter()
+    con = duckdb.connect()
+    result_duck = con.execute(f"""
+        SELECT
+            field_id,
+            AVG(temperature_c)      AS avg_temp,
+            AVG(humidity_pct)       AS avg_humidity,
+            AVG(soil_moisture_pct)  AS avg_soil_moisture,
+            AVG(ph)                 AS avg_ph,
+            COUNT(*)                AS records
+        FROM read_parquet('{PARQUET_PATH}')
+        WHERE temperature_c > 10
+          AND humidity_pct  > 40
+        GROUP BY field_id
+        ORDER BY avg_temp DESC
+    """).df()
+    t_duck = time.perf_counter() - t0
+ 
+    print(result_duck.to_string(index=False))
+ 
+    t0 = time.perf_counter()
+    df = pl.read_parquet(PARQUET_PATH)
+    result_polars = (
+        df
+        .filter((pl.col("temperature_c") > 10) & (pl.col("humidity_pct") > 40))
+        .group_by("field_id")
+        .agg(
+            pl.col("temperature_c").mean().alias("avg_temp"),
+            pl.col("humidity_pct").mean().alias("avg_humidity"),
+            pl.col("soil_moisture_pct").mean().alias("avg_soil_moisture"),
+            pl.col("ph").mean().alias("avg_ph"),
+            pl.len().alias("records"),
+        )
+        .sort("avg_temp", descending=True)
+    )
+    t_polars = time.perf_counter() - t0
+ 
+    print(f"\nDuckDB  query time: {t_duck*1000:.2f} ms")
+    print(f"Polars  query time: {t_polars*1000:.2f} ms")
+    print(f"Speedup factor    : {t_polars/t_duck:.2f}x (DuckDB faster)" if t_duck < t_polars
+          else f"Speedup factor    : {t_duck/t_polars:.2f}x (Polars faster)")
+    
+
 if __name__ == "__main__":
     sensors_raw, weather_raw = task4_import()
     sensors_clean, weather_clean = task5_clean(sensors_raw, weather_raw)
     task6_aggregate(sensors_clean, weather_clean)
     task7_parquet(sensors_clean, weather_clean)
+    task8_duckdb()
     print("\n✓ Pipeline complete")
