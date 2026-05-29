@@ -161,3 +161,27 @@ AVG, MIN, MAX для температуры, SUM для осадков и азо
 
 ---
 
+
+## Задание 7: Сохранение в Parquet
+
+**Инструмент:** Claude (claude.ai)
+
+**Промпт:**
+Дополни pipeline.py: добавь функцию task7_parquet(sensors, weather), которая сохраняет
+очищенные DataFrame в формат Parquet. Сенсоры — в data/agro_clean.parquet, метеостанции —
+в data/weather_clean.parquet. Вывести путь и размер каждого файла. Без комментариев
+в коде.
+
+**Что сделано:**
+1. `sensors.write_parquet("data/agro_clean.parquet")`
+2. `weather.write_parquet("data/weather_clean.parquet")`
+3. Вывод пути и `os.path.getsize()` в байтах для каждого файла
+4. `main` обновлён: вызов `task7_parquet` после агрегации
+
+**Что исправлялось вручную:** ничего
+
+### Итого
+- Количество промптов: 1
+- Время: ~3 мин
+
+---
