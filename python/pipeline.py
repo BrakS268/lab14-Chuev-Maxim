@@ -154,26 +154,6 @@ def task6_aggregate(sensors: pl.DataFrame, weather: pl.DataFrame):
 def task7_parquet(sensors: pl.DataFrame, weather: pl.DataFrame):
     print("\n── Task 7: Save to Parquet ─────────────────────────")
  
-    sensors_tagged = sensors.with_columns(pl.lit("sensor").alias("source_type"))
-    weather_tagged = weather.rename({
-        "station_id": "sensor_id",
-        "region": "field_id",
-    }).with_columns(
-        pl.lit(None).cast(pl.Float64).alias("soil_moisture_pct"),
-        pl.lit(None).cast(pl.Float64).alias("soil_temp_c"),
-        pl.lit(None).cast(pl.Float64).alias("nitrogen_mg_kg"),
-        pl.lit(None).cast(pl.Float64).alias("phosphorus_mg_kg"),
-        pl.lit(None).cast(pl.Float64).alias("potassium_mg_kg"),
-        pl.lit(None).cast(pl.Float64).alias("ph"),
-        pl.lit(None).cast(pl.Float64).alias("pressure_hpa"),
-        pl.lit(None).cast(pl.Float64).alias("wind_speed_ms"),
-        pl.lit(None).cast(pl.Float64).alias("wind_direction_deg"),
-        pl.lit(None).cast(pl.Float64).alias("rainfall_mm"),
-        pl.lit(None).cast(pl.Float64).alias("solar_radiation_wm2"),
-        pl.lit(None).cast(pl.Float64).alias("dew_point_c"),
-        pl.lit("weather").alias("source_type"),
-    )
- 
     sensors.write_parquet(PARQUET_PATH)
     print(f"Saved sensors to {PARQUET_PATH} ({os.path.getsize(PARQUET_PATH):,} bytes)")
  
@@ -229,7 +209,7 @@ def task8_duckdb():
           else f"Speedup factor    : {t_duck/t_polars:.2f}x (Polars faster)")
     
 
-    # ── Task 9: Visualizations ────────────────────────────────────────────────────
+# ── Task 9: Visualizations ────────────────────────────────────────────────────
 
 def task9_visualize(sensors: pl.DataFrame, weather: pl.DataFrame):
     print("\n── Task 9: Visualizations ──────────────────────────")
