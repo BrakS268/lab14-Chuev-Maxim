@@ -229,10 +229,112 @@ def task8_duckdb():
           else f"Speedup factor    : {t_duck/t_polars:.2f}x (Polars faster)")
     
 
+    # ── Task 9: Visualizations ────────────────────────────────────────────────────
+
+def task9_visualize(sensors: pl.DataFrame, weather: pl.DataFrame):
+    print("\n── Task 9: Visualizations ──────────────────────────")
+ 
+    fig1 = go.Figure()
+    for field in sensors["field_id"].unique().sort():
+        subset = (
+            sensors
+            .filter(pl.col("field_id") == field)
+            .sort("timestamp")
+        )
+        fig1.add_trace(go.Scatter(
+            x=subset["timestamp"].to_list(),
+            y=subset["temperature_c"].to_list(),
+            mode="lines",
+            name=field,
+            line=dict(width=1.5),
+        ))
+ 
+    fig1.update_layout(
+        title="Температура по полям (168 часов)",
+        xaxis_title="Время",
+        yaxis_title="Температура, °C",
+        template="plotly_white",
+        legend_title="Поле",
+        height=500,
+    )
+    path1 = f"{PLOTS_DIR}/temp_timeseries.html"
+    fig1.write_html(path1)
+    print(f"Saved: {path1}")
+ 
+    fig2 = make_subplots(rows=1, cols=2, subplot_titles=["Влажность воздуха", "Влажность почвы"])
+ 
+    fig2.add_trace(
+        go.Histogram(x=sensors["humidity_pct"].to_list(), nbinsx=30,
+                     name="Влажность воздуха", marker_color="#4C78A8"),
+        row=1, col=1
+    )
+    fig2.add_trace(
+        go.Histogram(x=sensors["soil_moisture_pct"].to_list(), nbinsx=30,
+                     name="Влажность почвы", marker_color="#72B7B2"),
+        row=1, col=2
+    )
+ 
+    fig2.update_layout(
+        title="Распределение влажности",
+        template="plotly_white",
+        showlegend=False,
+        height=450,
+    )
+    path2 = f"{PLOTS_DIR}/humidity_histograms.html"
+    fig2.write_html(path2)
+    print(f"Saved: {path2}")
+ 
+    weather_agg = (
+        weather
+        .group_by("region")
+        .agg(pl.col("rainfall_mm").sum().alias("total_rainfall"))
+        .sort("region")
+    )
+ 
+    fig3 = go.Figure(go.Pie(
+        labels=weather_agg["region"].to_list(),
+        values=weather_agg["total_rainfall"].to_list(),
+        hole=0.35,
+        textinfo="label+percent",
+    ))
+    fig3.update_layout(
+        title="Распределение осадков по регионам",
+        template="plotly_white",
+        height=450,
+    )
+    path3 = f"{PLOTS_DIR}/rainfall_pie.html"
+    fig3.write_html(path3)
+    print(f"Saved: {path3}")
+ 
+    sensor_cols = ["temperature_c", "humidity_pct", "soil_moisture_pct", "ph",
+                   "nitrogen_mg_kg", "phosphorus_mg_kg", "potassium_mg_kg"]
+    corr_data = sensors.select(sensor_cols).to_pandas().corr()
+ 
+    fig4 = go.Figure(go.Heatmap(
+        z=corr_data.values,
+        x=sensor_cols,
+        y=sensor_cols,
+        colorscale="RdBu",
+        zmid=0,
+        text=corr_data.round(2).values,
+        texttemplate="%{text}",
+    ))
+    fig4.update_layout(
+        title="Корреляционная матрица датчиков полей",
+        template="plotly_white",
+        height=550,
+        width=700,
+    )
+    path4 = f"{PLOTS_DIR}/correlation_heatmap.html"
+    fig4.write_html(path4)
+    print(f"Saved: {path4}")
+
+
 if __name__ == "__main__":
     sensors_raw, weather_raw = task4_import()
     sensors_clean, weather_clean = task5_clean(sensors_raw, weather_raw)
     task6_aggregate(sensors_clean, weather_clean)
     task7_parquet(sensors_clean, weather_clean)
     task8_duckdb()
+    task9_visualize(sensors_clean, weather_clean)
     print("\n✓ Pipeline complete")
