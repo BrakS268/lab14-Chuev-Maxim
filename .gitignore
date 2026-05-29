@@ -1,0 +1,33 @@
+# Go
+collector/agro-collector
+collector/*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Data files (generated)
+data/*.json
+data/*.csv
+data/*.parquet
+
+# Visualizations (generated)
+*.png
+*.html
+
+# DuckDB
+*.duckdb
+*.duckdb.wal
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env
+.env
+
+# OS
+.DS_Store
+Thumbs.db
