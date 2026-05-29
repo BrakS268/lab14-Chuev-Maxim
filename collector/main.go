@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+const (
+	batchSize    = 20
+	flushTimeout = 2 * time.Second
+)
+
 type SensorReading struct {
 	SensorID    string    `json:"sensor_id"`
 	FieldID     string    `json:"field_id"`
@@ -38,6 +43,88 @@ type WeatherReading struct {
 	DewPoint    float64   `json:"dew_point_c"`
 }
 
+type BatchWriter struct {
+	path    string
+	ch      chan any
+	done    chan struct{}
+	wg      sync.WaitGroup
+	mu      sync.Mutex
+	flushes int
+	total   int
+}
+
+func newBatchWriter(path string, bufSize int) *BatchWriter {
+	bw := &BatchWriter{
+		path: path,
+		ch:   make(chan any, bufSize),
+		done: make(chan struct{}),
+	}
+	bw.wg.Add(1)
+	go bw.loop()
+	return bw
+}
+
+func (bw *BatchWriter) Send(record any) {
+	bw.ch <- record
+}
+
+func (bw *BatchWriter) Close() {
+	close(bw.ch)
+	bw.wg.Wait()
+}
+
+func (bw *BatchWriter) Stats() (flushes, total int) {
+	bw.mu.Lock()
+	defer bw.mu.Unlock()
+	return bw.flushes, bw.total
+}
+
+func (bw *BatchWriter) loop() {
+	defer bw.wg.Done()
+
+	f, err := os.Create(bw.path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "batch writer: cannot open %s: %v\n", bw.path, err)
+		return
+	}
+	defer f.Close()
+
+	enc := json.NewEncoder(f)
+	batch := make([]any, 0, batchSize)
+	ticker := time.NewTicker(flushTimeout)
+	defer ticker.Stop()
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		for _, r := range batch {
+			enc.Encode(r)
+		}
+		bw.mu.Lock()
+		bw.flushes++
+		bw.total += len(batch)
+		bw.mu.Unlock()
+		batch = batch[:0]
+	}
+
+	for {
+		select {
+		case rec, ok := <-bw.ch:
+			if !ok {
+				flush()
+				return
+			}
+			batch = append(batch, rec)
+			if len(batch) >= batchSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		}
+	}
+}
+
 var fields = []string{"field-01", "field-02", "field-03", "field-04", "field-05"}
 var regions = []string{"north", "south", "east", "west", "central"}
 
@@ -51,7 +138,7 @@ func collectSensorData(fieldID string, readings int, rng *rand.Rand) []SensorRea
 		ts := baseTime.Add(time.Duration(i) * time.Hour)
 		hourFactor := math.Sin(float64(ts.Hour())*math.Pi/12.0) * 5.0
 
-		reading := SensorReading{
+		result = append(result, SensorReading{
 			SensorID:    fmt.Sprintf("sens-%s-%02d", fieldID, rng.Intn(3)+1),
 			FieldID:     fieldID,
 			Timestamp:   ts,
@@ -63,8 +150,7 @@ func collectSensorData(fieldID string, readings int, rng *rand.Rand) []SensorRea
 			Phosphorus:  round(clamp(45+rng.NormFloat64()*8, 0, 150), 2),
 			Potassium:   round(clamp(180+rng.NormFloat64()*25, 0, 400), 2),
 			pH:          round(clamp(6.5+rng.NormFloat64()*0.3, 4.0, 9.0), 2),
-		}
-		result = append(result, reading)
+		})
 	}
 	return result
 }
@@ -81,7 +167,7 @@ func collectWeatherData(stationID, region string, readings int, rng *rand.Rand) 
 		humidity := round(clamp(65+rng.NormFloat64()*12, 20, 100), 2)
 		dewPoint := round(temp-((100-humidity)/5), 2)
 
-		reading := WeatherReading{
+		result = append(result, WeatherReading{
 			StationID:   stationID,
 			Region:      region,
 			Timestamp:   ts,
@@ -93,26 +179,9 @@ func collectWeatherData(stationID, region string, readings int, rng *rand.Rand) 
 			Rainfall:    round(clamp(rng.ExpFloat64()*0.3, 0, 50), 2),
 			SolarRad:    round(clamp(500*math.Max(0, math.Sin(float64(ts.Hour())*math.Pi/12))+rng.NormFloat64()*30, 0, 1000), 2),
 			DewPoint:    dewPoint,
-		}
-		result = append(result, reading)
+		})
 	}
 	return result
-}
-
-func writeNDJSON(path string, records []any) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	enc := json.NewEncoder(f)
-	for _, r := range records {
-		if err := enc.Encode(r); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func round(v, decimals float64) float64 {
@@ -143,19 +212,17 @@ func main() {
 		go func(fid string) {
 			defer wg.Done()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			readings := collectSensorData(fid, readingsPerSource, rng)
-
-			records := make([]any, len(readings))
-			for i, r := range readings {
-				records[i] = r
-			}
-
 			path := fmt.Sprintf("../data/sensors_%s.json", fid)
-			if err := writeNDJSON(path, records); err != nil {
-				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", path, err)
-				return
+			bw := newBatchWriter(path, batchSize*2)
+
+			readings := collectSensorData(fid, readingsPerSource, rng)
+			for _, r := range readings {
+				bw.Send(r)
 			}
-			fmt.Printf("[sensor] %s: %d records → %s\n", fid, len(readings), path)
+			bw.Close()
+
+			flushes, total := bw.Stats()
+			fmt.Printf("[sensor]  %s: %d records, %d flushes → %s\n", fid, total, flushes, path)
 		}(fieldID)
 	}
 
@@ -165,23 +232,21 @@ func main() {
 			defer wg.Done()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano() + int64(idx)))
 			stationID := fmt.Sprintf("ws-%s-%02d", reg, idx+1)
-			readings := collectWeatherData(stationID, reg, readingsPerSource, rng)
-
-			records := make([]any, len(readings))
-			for i, r := range readings {
-				records[i] = r
-			}
-
 			path := fmt.Sprintf("../data/weather_%s.json", reg)
-			if err := writeNDJSON(path, records); err != nil {
-				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", path, err)
-				return
+			bw := newBatchWriter(path, batchSize*2)
+
+			readings := collectWeatherData(stationID, reg, readingsPerSource, rng)
+			for _, r := range readings {
+				bw.Send(r)
 			}
-			fmt.Printf("[weather] %s: %d records → %s\n", reg, len(readings), path)
+			bw.Close()
+
+			flushes, total := bw.Stats()
+			fmt.Printf("[weather] %s: %d records, %d flushes → %s\n", reg, total, flushes, path)
 		}(i, region)
 	}
 
 	wg.Wait()
-	fmt.Printf("\nDone in %s. Sources: %d fields + %d weather stations\n",
-		time.Since(start).Round(time.Millisecond), len(fields), len(regions))
+	fmt.Printf("\nDone in %s. batch_size=%d flush_timeout=%s\n",
+		time.Since(start).Round(time.Millisecond), batchSize, flushTimeout)
 }
