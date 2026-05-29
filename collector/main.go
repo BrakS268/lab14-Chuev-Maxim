@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -128,13 +131,20 @@ func (bw *BatchWriter) loop() {
 var fields = []string{"field-01", "field-02", "field-03", "field-04", "field-05"}
 var regions = []string{"north", "south", "east", "west", "central"}
 
-func collectSensorData(fieldID string, readings int, rng *rand.Rand) []SensorReading {
+func collectSensorData(ctx context.Context, fieldID string, readings int, rng *rand.Rand) []SensorReading {
 	result := make([]SensorReading, 0, readings)
 	baseTime := time.Now().Add(-time.Duration(readings) * time.Hour)
 	baseTemp := 15.0 + rng.Float64()*10
 	baseMoist := 30.0 + rng.Float64()*30
 
 	for i := 0; i < readings; i++ {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("[sensor]  %s: interrupted at record %d/%d\n", fieldID, i, readings)
+			return result
+		default:
+		}
+
 		ts := baseTime.Add(time.Duration(i) * time.Hour)
 		hourFactor := math.Sin(float64(ts.Hour())*math.Pi/12.0) * 5.0
 
@@ -155,12 +165,19 @@ func collectSensorData(fieldID string, readings int, rng *rand.Rand) []SensorRea
 	return result
 }
 
-func collectWeatherData(stationID, region string, readings int, rng *rand.Rand) []WeatherReading {
+func collectWeatherData(ctx context.Context, stationID, region string, readings int, rng *rand.Rand) []WeatherReading {
 	result := make([]WeatherReading, 0, readings)
 	baseTime := time.Now().Add(-time.Duration(readings) * time.Hour)
 	baseTemp := 12.0 + rng.Float64()*12
 
 	for i := 0; i < readings; i++ {
+		select {
+		case <-ctx.Done():
+			fmt.Printf("[weather] %s: interrupted at record %d/%d\n", region, i, readings)
+			return result
+		default:
+		}
+
 		ts := baseTime.Add(time.Duration(i) * time.Hour)
 		hourFactor := math.Sin(float64(ts.Hour())*math.Pi/12.0) * 6.0
 		temp := round(baseTemp+hourFactor+rng.NormFloat64()*0.8, 2)
@@ -204,6 +221,17 @@ func main() {
 
 	os.MkdirAll("../data", 0755)
 
+	ctx, cancel := context.WithCancel(context.Background())
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		fmt.Printf("\n[signal] received %s — initiating graceful shutdown...\n", sig)
+		cancel()
+	}()
+
 	var wg sync.WaitGroup
 	start := time.Now()
 
@@ -215,7 +243,7 @@ func main() {
 			path := fmt.Sprintf("../data/sensors_%s.json", fid)
 			bw := newBatchWriter(path, batchSize*2)
 
-			readings := collectSensorData(fid, readingsPerSource, rng)
+			readings := collectSensorData(ctx, fid, readingsPerSource, rng)
 			for _, r := range readings {
 				bw.Send(r)
 			}
@@ -235,7 +263,7 @@ func main() {
 			path := fmt.Sprintf("../data/weather_%s.json", reg)
 			bw := newBatchWriter(path, batchSize*2)
 
-			readings := collectWeatherData(stationID, reg, readingsPerSource, rng)
+			readings := collectWeatherData(ctx, stationID, reg, readingsPerSource, rng)
 			for _, r := range readings {
 				bw.Send(r)
 			}
@@ -247,6 +275,11 @@ func main() {
 	}
 
 	wg.Wait()
-	fmt.Printf("\nDone in %s. batch_size=%d flush_timeout=%s\n",
-		time.Since(start).Round(time.Millisecond), batchSize, flushTimeout)
+
+	if ctx.Err() != nil {
+		fmt.Printf("\n[shutdown] graceful shutdown complete in %s\n", time.Since(start).Round(time.Millisecond))
+	} else {
+		fmt.Printf("\nDone in %s. batch_size=%d flush_timeout=%s\n",
+			time.Since(start).Round(time.Millisecond), batchSize, flushTimeout)
+	}
 }
