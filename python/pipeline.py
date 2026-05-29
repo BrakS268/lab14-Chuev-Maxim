@@ -107,6 +107,50 @@ def task5_clean(sensors: pl.DataFrame, weather: pl.DataFrame):
     return sensors, weather
 
 
+# ── Task 6: Aggregation ───────────────────────────────────────────────────────
+ 
+def task6_aggregate(sensors: pl.DataFrame, weather: pl.DataFrame):
+    print("\n── Task 6: Aggregation ─────────────────────────────")
+ 
+    sensor_agg = (
+        sensors
+        .group_by("field_id")
+        .agg(
+            pl.col("temperature_c").mean().alias("avg_temp"),
+            pl.col("temperature_c").min().alias("min_temp"),
+            pl.col("temperature_c").max().alias("max_temp"),
+            pl.col("humidity_pct").mean().alias("avg_humidity"),
+            pl.col("soil_moisture_pct").mean().alias("avg_soil_moisture"),
+            pl.col("ph").mean().alias("avg_ph"),
+            pl.col("nitrogen_mg_kg").sum().alias("sum_nitrogen"),
+            pl.len().alias("count"),
+        )
+        .sort("field_id")
+    )
+    print("\nSensor aggregation by field_id:")
+    print(sensor_agg)
+ 
+    weather_agg = (
+        weather
+        .group_by("region")
+        .agg(
+            pl.col("temperature_c").mean().alias("avg_temp"),
+            pl.col("pressure_hpa").mean().alias("avg_pressure"),
+            pl.col("rainfall_mm").sum().alias("total_rainfall"),
+            pl.col("wind_speed_ms").max().alias("max_wind"),
+            pl.col("solar_radiation_wm2").mean().alias("avg_solar_rad"),
+            pl.len().alias("count"),
+        )
+        .sort("region")
+    )
+    print("\nWeather aggregation by region:")
+    print(weather_agg)
+ 
+    return sensor_agg, weather_agg
+
+
 if __name__ == "__main__":
     sensors_raw, weather_raw = task4_import()
+    sensors_clean, weather_clean = task5_clean(sensors_raw, weather_raw)
+    task6_aggregate(sensors_clean, weather_clean)
     print("\n✓ Pipeline complete")
